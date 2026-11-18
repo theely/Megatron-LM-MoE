@@ -755,6 +755,7 @@ def _allreduce_non_tensor_model_parallel_grads(
                 # Check if this param needs sum reduction (sequence parallel or qk_layernorm)
                 elif (config.sequence_parallel and getattr(param, "sequence_parallel", False)) or (
                     config.qk_layernorm and ("q_layernorm" in name or "k_layernorm" in name)
+                    or getattr(param, "sum_gradients_across_tp_domain", False)
                 ):
                     grad_attr = _get_main_grad_attr(param)
                     grad = getattr(param, grad_attr)

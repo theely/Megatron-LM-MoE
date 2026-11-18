@@ -173,6 +173,14 @@ class MLPSubmodules:
     """
 
 
+def _is_te_activation_op(builder) -> bool:
+    """Whether builder is the Transformer Engine activation op of the spec providers."""
+    try:
+        from megatron.core.extensions.transformer_engine import TEActivationOp
+    except ImportError:
+        return False
+    return TEActivationOp is not None and builder is TEActivationOp
+
 class MLP(MegatronModule):
     """
     MLP will take the input with h hidden state, project it to 4*h
@@ -250,7 +258,14 @@ class MLP(MegatronModule):
             stride=fc1_stride,
         )
 
-        if self.config.use_te_activation_func and not (submodules.activation_func is None):
+        # A TE activation op is used only when config.use_te_activation_func is set (specs, e.g.
+        # the MoE shared-expert spec, may pass one regardless). Any other activation module,
+        # such as Apertus' xIELU with learnable parameters, is always used.
+        self._activation_func_is_module = submodules.activation_func is not None and (
+            self.config.use_te_activation_func
+            or not _is_te_activation_op(submodules.activation_func)
+        )
+        if self._activation_func_is_module:
             self.activation_func = apply_module(submodules.activation_func(config=self.config))
         else:
             self.activation_func = self.config.activation_func
@@ -317,7 +332,7 @@ class MLP(MegatronModule):
         nvtx_range_pop(suffix="linear_fc1")
 
         nvtx_range_push(suffix="activation")
-        if self.config.use_te_activation_func:
+        if self.config.use_te_activation_func or self._activation_func_is_module:
             if bias_parallel is not None:
                 intermediate_parallel = intermediate_parallel + bias_parallel
             intermediate_parallel = self.activation_func(intermediate_parallel)
